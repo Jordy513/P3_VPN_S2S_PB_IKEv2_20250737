@@ -214,7 +214,9 @@ crypto ikev2 proposal PROP_IKEv2
  encryption aes-cbc-256
  integrity sha256
  group 14
- prf sha256
+! NOTA: el comando "prf" no está disponible en IOSv/IOS 15.x.
+! IOS deriva el PRF automáticamente del algoritmo de integridad (SHA256).
+! Solo agregar "prf" si el equipo corre IOS-XE 16.x o superior y lo acepta.
 
 ! ─── PASO 2: IKEv2 Policy ──────────────────────────────
 ! Vincula el Proposal a una política global.
@@ -300,7 +302,6 @@ crypto ikev2 proposal PROP_IKEv2
  encryption aes-cbc-256
  integrity sha256
  group 14
- prf sha256
 
 ! ─── PASO 2: IKEv2 Policy ──────────────────────────────
 crypto ikev2 policy POL_IKEv2
@@ -371,7 +372,21 @@ ip 20.25.37.3 255.255.255.128 20.25.37.1
 
 ## 5. Verificación del Túnel
 
-### 5.1 Verificar el estado de la IKEv2 SA
+### 5.1 Disparar la negociación IKEv2 (paso obligatorio)
+
+> ⚠️ **IKEv2 es lazy por defecto** — a diferencia de IKEv1, el túnel **no se negocia automáticamente** al aplicar la configuración. La SA se crea únicamente cuando hay tráfico interesante que la dispara. Si se ejecuta `show crypto ikev2 sa` sin haber generado tráfico, el comando devuelve vacío aunque la configuración esté correcta.
+
+Para disparar la negociación, ejecutar un ping desde una red LAN hacia la otra. Desde R1 se puede hacer un ping extendido simulando origen en la LAN del Site A:
+
+```cisco
+R1# ping 20.25.37.2 source 20.25.37.129 repeat 5
+```
+
+Una vez que el ping genera tráfico interesante, la negociación IKEv2 ocurre en background (4 mensajes: IKE_SA_INIT + IKE_AUTH) y la SA queda establecida.
+
+---
+
+### 5.2 Verificar el estado de la IKEv2 SA
 
 En IKEv2 el comando de verificación principal cambia de `show crypto isakmp sa` a `show crypto ikev2 sa`:
 
@@ -394,35 +409,35 @@ Tunnel-id Local                 Remote                fvrf/ivrf            Statu
 
 ---
 
-### 5.2 Verificar detalles completos de la IKEv2 SA
+### 5.3 Verificar detalles completos de la IKEv2 SA
 
 ```cisco
 R1# show crypto ikev2 sa detail
 ```
 
-*Salida esperada (fragmento):*
+*Salida esperada (IOSv):*
 
 ```
+ IPv4 Crypto IKEv2  SA
 Tunnel-id Local                 Remote                fvrf/ivrf            Status
 1         192.168.1.10/500      192.168.1.20/500      none/none            READY
-      Encr: AES-CBC, keysize: 256, PRF: HMAC-SHA256, Hash: SHA256, DH Grp:14, Auth sign: PSK, Auth verify: PSK
-      Life/Active Time: 86400/142 sec
+      Encr: AES-CBC, keysize: 256, Hash: SHA256, DH Grp:14, Auth sign: PSK, Auth verify: PSK
+      Life/Active Time: 86400/39 sec
       CE id: 1001, Session-id: 1
       Status Description: Negotiation done
-      Local spi: 0x1234ABCD       Remote spi: 0xDCBA4321
-      Local req msg id:  0        Remote req msg id:  2
-      Local next msg id: 2        Remote next msg id: 0
-      Child SA:
-      Child sa: local selector  20.25.37.128/0 - 20.25.37.255/65535
-                remote selector 20.25.37.0/0 - 20.25.37.127/65535
-                ESP spi in/out: 0xABC123/0x321CBA
+      Local spi: 7B2D42E1991622C1       Remote spi: 92E698E3FE3CCE34
+      Local id: 192.168.1.10
+      Remote id: 192.168.1.20
+      DPD configured for 0 seconds, retry 0
+      NAT-T is not detected
+      Initiator of SA : Yes
 ```
 
-> La sección **Child SA** muestra los Traffic Selectors negociados — la confirmación de qué subredes están protegidas por el túnel IPSec.
+> **Nota sobre IOSv:** En esta versión de IOS la sección `Child SA` no aparece en el output de `show crypto ikev2 sa detail`. Eso es normal — los selectores de tráfico y los SPIs de ESP se visualizan con `show crypto ipsec sa` (sección 5.4).
 
 ---
 
-### 5.3 Verificar las IPSec SAs (Child SAs)
+### 5.4 Verificar las IPSec SAs (Child SAs)
 
 ```cisco
 R1# show crypto ipsec sa
@@ -448,32 +463,15 @@ interface: Ethernet0/0
 
 ---
 
-### 5.4 Verificar la estadística de sesión IKEv2
+### 5.5 Verificar la estadística de sesión IKEv2
 
 ```cisco
 R1# show crypto ikev2 session
 ```
 
-*Salida esperada:*
-
-```
- IPv4 Crypto IKEv2 Session
-
-Session-id:1, Status:UP-ACTIVE, IKE count:1, CHILD count:1
-
-Tunnel-id Local                 Remote                Status
-1         192.168.1.10/500      192.168.1.20/500      READY
-      Encr: AES-CBC, keysize: 256, PRF: HMAC-SHA256, Hash: SHA256, DH Grp:14
-      Auth sign: PSK, Auth verify: PSK
-      Life/Active Time: 86400/198 sec
-Child sa: local selector  20.25.37.128/0 - 20.25.37.255/65535
-          remote selector 20.25.37.0/0 - 20.25.37.127/65535
-          ESP spi in/out: 0xABC123/0x321CBA
-```
-
 ---
 
-### 5.5 Verificar conectividad extremo a extremo
+### 5.6 Verificar conectividad extremo a extremo
 
 Ejecutar desde **PC1** hacia **PC3**:
 
@@ -491,14 +489,14 @@ PC1> ping 20.25.37.2
 
 ---
 
-### 5.6 Tabla de comandos de verificación
+### 5.7 Tabla de comandos de verificación
 
 | Comando | Qué muestra | Equivalente IKEv1 |
 |---|---|---|
 | `show crypto ikev2 sa` | Estado de la IKEv2 SA. Debe ser `READY`. | `show crypto isakmp sa` (QM_IDLE) |
-| `show crypto ikev2 sa detail` | Parámetros negociados, SPIs, Child SA selectors. | `show crypto isakmp sa detail` |
-| `show crypto ikev2 session` | Sesión activa con contadores y Child SAs. | `show crypto engine connections active` |
-| `show crypto ipsec sa` | Child SAs IPSec, SPIs, contadores de paquetes. | Idéntico en ambas versiones |
+| `show crypto ikev2 sa detail` | Parámetros negociados, SPIs IKE, identidades locales/remotas. | `show crypto isakmp sa detail` |
+| `show crypto ipsec sa` | Child SAs IPSec, selectores de tráfico, contadores de paquetes. | Idéntico en ambas versiones |
+| `show crypto ikev2 session` | Sesión activa con estado UP-ACTIVE. | `show crypto engine connections active` |
 | `show crypto ikev2 policy` | Confirma la política IKEv2 configurada. | `show crypto isakmp policy` |
 | `show crypto map` | Muestra la Crypto Map aplicada y sus parámetros. | Idéntico en ambas versiones |
 | `show ip access-lists ACL_IPSEC_TRAFFIC` | Verifica hits en la ACL de tráfico interesante. | Idéntico en ambas versiones |
@@ -519,7 +517,7 @@ A continuación se detalla el índice de evidencias correspondientes a las fases
 | 5 | [`05_config_r1_cryptomap.png`](screenshots/05_config_r1_cryptomap.png) | Consola de R1 mostrando el Transform Set, la ACL de tráfico interesante y la Crypto Map con `set ikev2-profile` aplicada a `Ethernet0/0`. |
 | 6 | [`06_config_r2_completa.png`](screenshots/06_config_r2_completa.png) | Configuración completa de R2 (Site B) mostrando el IKEv2 keyring con peer `192.168.1.10` y la ACL espejo. |
 | 7 | [`07_ikev2_sa_ready.png`](screenshots/07_ikev2_sa_ready.png) | Salida de `show crypto ikev2 sa` en R1 mostrando estado `READY` con parámetros AES-256/SHA256/DH14. |
-| 8 | [`08_ikev2_sa_detail.png`](screenshots/08_ikev2_sa_detail.png) | Salida de `show crypto ikev2 sa detail` mostrando los Traffic Selectors de la Child SA negociada. |
+| 8 | [`08_ipsec_sa_contadores.png`](screenshots/08_ipsec_sa_contadores.png) | Salida de `show crypto ipsec sa` mostrando los SPIs de ESP, los selectores de tráfico (`local/remote ident`) y los contadores `#pkts encaps/decaps` incrementando con tráfico activo. |
 | 9 | [`09_ping_con_vpn_activa.png`](screenshots/09_ping_con_vpn_activa.png) | Ping exitoso desde PC1 (`20.25.37.130`) hacia PC4 (`20.25.37.3`) con el túnel IPSec IKEv2 activo, TTL=62. |
 
 ---
