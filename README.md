@@ -374,7 +374,7 @@ ip 20.25.37.3 255.255.255.128 20.25.37.1
 
 ### 5.1 Disparar la negociación IKEv2 (paso obligatorio)
 
-> ⚠️ **IKEv2 es lazy por defecto** — a diferencia de IKEv1, el túnel **no se negocia automáticamente** al aplicar la configuración. La SA se crea únicamente cuando hay tráfico interesante que la dispara. Si se ejecuta `show crypto ikev2 sa` sin haber generado tráfico, el comando devuelve vacío aunque la configuración esté correcta.
+> **IKEv2 es lazy por defecto**, el túnel **no se negocia automáticamente** al aplicar la configuración. La SA se crea únicamente cuando hay tráfico interesante que la dispara. Si se ejecuta `show crypto ikev2 sa` sin haber generado tráfico, el comando devuelve vacío aunque la configuración esté correcta.
 
 Para disparar la negociación, ejecutar un ping desde una red LAN hacia la otra. Desde R1 se puede hacer un ping extendido simulando origen en la LAN del Site A:
 
