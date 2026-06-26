@@ -1,0 +1,158 @@
+! ══════════════════════════════════════════════════════
+! R1 — Site A | IPSec IKEv2 Policy-Based VPN
+! Jordy Rosario — 20250737 | Seguridad de Redes 2026-C-2
+! ══════════════════════════════════════════════════════
+
+hostname R1
+
+! ─── Interfaces ────────────────────────────────────────
+interface Ethernet0/0
+ description WAN-hacia-ISP
+ ip address 192.168.1.10 255.255.255.0
+ no shutdown
+
+interface Ethernet0/1
+ description LAN-SiteA
+ ip address 20.25.37.129 255.255.255.128
+ no shutdown
+
+! ─── Ruta por defecto hacia Internet (ISP) ─────────────
+ip route 0.0.0.0 0.0.0.0 192.168.1.2
+
+! ══════════════════════════════════════════════════════
+! BLOQUE IKEv2 — reemplaza completamente a crypto isakmp
+! ══════════════════════════════════════════════════════
+
+! ─── PASO 1: IKEv2 Proposal ────────────────────────────
+! Define los algoritmos criptográficos del canal IKE SA.
+! Equivalente a: crypto isakmp policy en IKEv1.
+crypto ikev2 proposal PROP_IKEv2
+ encryption aes-cbc-256
+ integrity sha256
+ group 14
+! NOTA: el comando "prf" no está disponible en IOSv/IOS 15.x.
+! IOS deriva el PRF automáticamente del algoritmo de integridad (SHA256).
+! Solo agregar "prf" si el equipo corre IOS-XE 16.x o superior y lo acepta.
+
+! ─── PASO 2: IKEv2 Policy ──────────────────────────────
+! Vincula el Proposal a una política global.
+! En IKEv1 la policy incluía todo; en IKEv2 está separado.
+crypto ikev2 policy POL_IKEv2
+ proposal PROP_IKEv2
+
+! ─── PASO 3: IKEv2 Keyring ─────────────────────────────
+! Define las pre-shared keys por peer.
+! Equivalente a: crypto isakmp key en IKEv1.
+crypto ikev2 keyring KR_SITEB
+ peer R2_SITEB
+  address 192.168.1.20
+  pre-shared-key local  JordyITLA2026!
+  pre-shared-key remote JordyITLA2026!
+
+! ─── PASO 4: IKEv2 Profile ─────────────────────────────
+! Une la política de matching con el keyring y la identidad.
+! No existe equivalente directo en IKEv1 — es nuevo en IKEv2.
+crypto ikev2 profile PROF_IKEv2
+ match identity remote address 192.168.1.20 255.255.255.255
+ authentication local pre-share
+ authentication remote pre-share
+ keyring local KR_SITEB
+
+! ══════════════════════════════════════════════════════
+! BLOQUE IPSEC — idéntico al de IKEv1, pero vincula IKEv2
+! ══════════════════════════════════════════════════════
+
+! ─── PASO 5: Transform Set ─────────────────────────────
+! Define cifrado y autenticación del tráfico de datos (ESP).
+! Igual que en IKEv1.
+crypto ipsec transform-set TS_AES256_SHA256 esp-aes 256 esp-sha256-hmac
+ mode tunnel
+
+! ─── PASO 6: ACL — Tráfico Interesante ─────────────────
+! Define qué flujos IP activan y son protegidos por IPSec.
+ip access-list extended ACL_IPSEC_TRAFFIC
+ permit ip 20.25.37.128 0.0.0.127 20.25.37.0 0.0.0.127
+
+! ─── PASO 7: Crypto Map ────────────────────────────────
+! Vincula el Transform Set, la ACL y el IKEv2 Profile.
+! La diferencia clave vs IKEv1: se agrega "set ikev2-profile".
+crypto map CMAP_SITEA 10 ipsec-isakmp
+ description Tunel-IPSec-IKEv2-hacia-SiteB-R2
+ set peer 192.168.1.20
+ set transform-set TS_AES256_SHA256
+ set ikev2-profile PROF_IKEv2
+ match address ACL_IPSEC_TRAFFIC
+ set security-association lifetime seconds 3600
+
+! ─── PASO 8: Aplicar Crypto Map a interfaz WAN ─────────
+interface Ethernet0/0
+ crypto map CMAP_SITEA
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+! ══════════════════════════════════════════════════════
+! R2 — Site B | IPSec IKEv2 Policy-Based VPN
+! Jordy Rosario — 20250737 | Seguridad de Redes 2026-C-2
+! ══════════════════════════════════════════════════════
+
+hostname R2
+
+! ─── Interfaces ────────────────────────────────────────
+interface Ethernet0/0
+ description WAN-hacia-ISP
+ ip address 192.168.1.20 255.255.255.0
+ no shutdown
+
+interface Ethernet0/1
+ description LAN-SiteB
+ ip address 20.25.37.1 255.255.255.128
+ no shutdown
+
+! ─── Ruta por defecto hacia Internet (ISP) ─────────────
+ip route 0.0.0.0 0.0.0.0 192.168.1.2
+
+! ─── PASO 1: IKEv2 Proposal ────────────────────────────
+crypto ikev2 proposal PROP_IKEv2
+ encryption aes-cbc-256
+ integrity sha256
+ group 14
+
+! ─── PASO 2: IKEv2 Policy ──────────────────────────────
+crypto ikev2 policy POL_IKEv2
+ proposal PROP_IKEv2
+
+! ─── PASO 3: IKEv2 Keyring ─────────────────────────────
+crypto ikev2 keyring KR_SITEA
+ peer R1_SITEA
+  address 192.168.1.10
+  pre-shared-key local  JordyITLA2026!
+  pre-shared-key remote JordyITLA2026!
+
+! ─── PASO 4: IKEv2 Profile ─────────────────────────────
+crypto ikev2 profile PROF_IKEv2
+ match identity remote address 192.168.1.10 255.255.255.255
+ authentication local pre-share
+ authentication remote pre-share
+ keyring local KR_SITEA
+
+! ─── PASO 5: Transform Set ─────────────────────────────
+crypto ipsec transform-set TS_AES256_SHA256 esp-aes 256 esp-sha256-hmac
+ mode tunnel
+
+! ─── PASO 6: ACL — Tráfico Interesante ─────────────────
+! La ACL debe ser el ESPEJO exacto de la ACL en R1.
+ip access-list extended ACL_IPSEC_TRAFFIC
+ permit ip 20.25.37.0 0.0.0.127 20.25.37.128 0.0.0.127
+
+! ─── PASO 7: Crypto Map ────────────────────────────────
+crypto map CMAP_SITEB 10 ipsec-isakmp
+ description Tunel-IPSec-IKEv2-hacia-SiteA-R1
+ set peer 192.168.1.10
+ set transform-set TS_AES256_SHA256
+ set ikev2-profile PROF_IKEv2
+ match address ACL_IPSEC_TRAFFIC
+ set security-association lifetime seconds 3600
+
+! ─── PASO 8: Aplicar Crypto Map a interfaz WAN ─────────
+interface Ethernet0/0
+ crypto map CMAP_SITEB
