@@ -1,4 +1,4 @@
-# Documentación técnica — IPSec VPN Basado en Políticas (IKEv1)
+# Documentación técnica — IPSec VPN Basado en Políticas (IKEv2)
 
 Este directorio contiene la documentación formal del laboratorio.
 
